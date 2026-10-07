@@ -30,3 +30,14 @@ bin/
 
 ### Mac OS ###
 .DS_Store
+### Gradle ###
+.gradle/
+build/
+!gradle-wrapper.jar
+
+### IntelliJ (missing from the generated file) ###
+.idea/
+*.iml
+
+### Never commit secrets ###
+src/main/resources/application.local.conf
