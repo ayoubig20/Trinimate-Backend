@@ -22,7 +22,7 @@ fun Route.playerRoutes() {
             call.respond(HttpStatusCode.BadRequest, ErrorResponse("lat and lng are required"))
             return@get
         }
-        call.respond(players.nearby(lat, lng, radius, sport))
+        call.respond(players.nearby(lat, lng, radius, sport, call.userId))
     }
 
     get("/players/{id}") {
@@ -32,8 +32,7 @@ fun Route.playerRoutes() {
     post("/players/{id}/ping") {
         val to = call.parameters["id"]!!.toLong()
         val req = call.receiveNullable<PingRequest>() ?: PingRequest()
-        players.ping(call.userId, to, req.message)
-        call.respond(mapOf("message" to "Ping sent"))
+        call.respond(players.togglePing(call.userId, to, req.message))
     }
 
     post("/pings/{id}/accept") {

@@ -23,6 +23,10 @@ class AuthService(private val hasher: PasswordHasher) {
                 it[passwordHash] = hasher.hash(req.password)
                 it[name] = req.name
                 it[city] = req.city
+                it[country] = req.country
+                it[phone] = req.phone
+                it[latitude] = req.latitude
+                it[longitude] = req.longitude
                 it[createdAt] = System.currentTimeMillis()
             } get Users.id
         }

@@ -9,11 +9,14 @@ object Users : Table("users") {
     val passwordHash = varchar("password_hash", 512)
     val name = varchar("name", 128)
     val city = varchar("city", 128).nullable()
+    val country = varchar("country", 128).nullable()
+    val phone = varchar("phone", 32).nullable()
     val bio = text("bio").nullable()
     val avatarUrl = varchar("avatar_url", 512).nullable()
     val latitude = double("latitude").nullable()
     val longitude = double("longitude").nullable()
     val radiusKm = double("radius_km").default(5.0)
+    val rating = double("rating").default(0.0)
     val createdAt = long("created_at")
     override val primaryKey = PrimaryKey(id)
 }
@@ -21,7 +24,7 @@ object Users : Table("users") {
 object UserSports : Table("user_sports") {
     val userId = reference("user_id", Users.id, onDelete = ReferenceOption.CASCADE)
     val sport = varchar("sport", 64)
-    val level = varchar("level", 32) // Beginner / Intermediate / Advanced
+    val level = varchar("level", 32)
     override val primaryKey = PrimaryKey(userId, sport)
 }
 
@@ -29,11 +32,12 @@ object Sessions : Table("sessions") {
     val id = long("id").autoIncrement()
     val sport = varchar("sport", 64)
     val title = varchar("title", 255)
-    val dateTime = long("date_time") // epoch millis
+    val dateTime = long("date_time")
     val place = varchar("place", 255)
     val latitude = double("latitude").nullable()
     val longitude = double("longitude").nullable()
     val fee = varchar("fee", 128).nullable()
+    val price = double("price").nullable()
     val playersNeeded = integer("players_needed")
     val createdBy = reference("created_by", Users.id)
     val visibleToCommunity = bool("visible").default(true)
@@ -53,7 +57,7 @@ object Pings : Table("pings") {
     val fromUser = reference("from_user", Users.id)
     val toUser = reference("to_user", Users.id)
     val message = varchar("message", 512).nullable()
-    val status = varchar("status", 16).default("pending") // pending / accepted / declined
+    val status = varchar("status", 16).default("pending")
     val createdAt = long("created_at")
     override val primaryKey = PrimaryKey(id)
 }
@@ -71,6 +75,7 @@ object Messages : Table("messages") {
     val chatId = reference("chat_id", Chats.id, onDelete = ReferenceOption.CASCADE)
     val senderId = reference("sender_id", Users.id)
     val text = text("text")
+    val kind = varchar("kind", 16).default("text")
     val sentAt = long("sent_at")
     override val primaryKey = PrimaryKey(id)
 }
@@ -81,16 +86,43 @@ object Events : Table("events") {
     val place = varchar("place", 255)
     val eventTime = long("event_time")
     val sport = varchar("sport", 64).nullable()
+    val createdBy = reference("created_by", Users.id).nullable()
+    val latitude = double("latitude").nullable()
+    val longitude = double("longitude").nullable()
     override val primaryKey = PrimaryKey(id)
+}
+
+object EventParticipants : Table("event_participants") {
+    val eventId = reference("event_id", Events.id, onDelete = ReferenceOption.CASCADE)
+    val userId = reference("user_id", Users.id, onDelete = ReferenceOption.CASCADE)
+    val joinedAt = long("joined_at")
+    override val primaryKey = PrimaryKey(eventId, userId)
 }
 
 object Notifications : Table("notifications") {
     val id = long("id").autoIncrement()
     val userId = reference("user_id", Users.id, onDelete = ReferenceOption.CASCADE)
     val type = varchar("type", 32)
+    val refId = long("ref_id").nullable()
     val title = varchar("title", 255)
     val body = text("body")
     val read = bool("read").default(false)
     val createdAt = long("created_at")
     override val primaryKey = PrimaryKey(id)
+}
+
+object Reactions : Table("reactions") {
+    val messageId = reference("message_id", Messages.id, onDelete = ReferenceOption.CASCADE)
+    val userId = reference("user_id", Users.id, onDelete = ReferenceOption.CASCADE)
+    val emoji = varchar("emoji", 8)
+    override val primaryKey = PrimaryKey(messageId, userId, emoji)
+}
+
+object Ratings : Table("ratings") {
+    val sessionId = reference("session_id", Sessions.id, onDelete = ReferenceOption.CASCADE)
+    val raterId = reference("rater_id", Users.id, onDelete = ReferenceOption.CASCADE)
+    val ratedId = reference("rated_id", Users.id, onDelete = ReferenceOption.CASCADE)
+    val stars = integer("stars")
+    val createdAt = long("created_at")
+    override val primaryKey = PrimaryKey(sessionId, raterId, ratedId)
 }

@@ -6,19 +6,28 @@ import com.trinimate.models.*
 import com.trinimate.security.JwtConfig
 import com.trinimate.security.userId
 import com.trinimate.services.ChatService
-import com.trinimate.services.PlayerService
 import io.ktor.server.application.*
+import io.ktor.server.request.*
+import io.ktor.server.response.*
 import io.ktor.server.routing.*
 import io.ktor.server.websocket.*
 import io.ktor.websocket.*
 import org.koin.ktor.ext.inject
-import io.ktor.server.request.*
-import io.ktor.server.response.*
+
 fun Route.chatRoutes() {
     val chats by inject<ChatService>()
-    val players by inject<PlayerService>()
 
-    get("/chats") { call.respond(emptyList<String>()) /* list user chats in Stage 6 refinement */ }
+    // All conversations of the logged-in user (real data from ChatService)
+    get("/chats") {
+        call.respond(chats.listChats(call.userId))
+    }
+
+    // Open (or create) a 1:1 chat with another user — returns the chatId
+    post("/chats/with/{userId}") {
+        val other = call.parameters["userId"]!!.toLong()
+        val chatId = chats.getOrCreateChat(call.userId, other)
+        call.respond(mapOf("chatId" to chatId))
+    }
 
     get("/chats/{id}/messages") {
         call.respond(chats.messages(call.parameters["id"]!!.toLong(), call.userId))
@@ -30,15 +39,25 @@ fun Route.chatRoutes() {
         chats.broadcast(chatId, saved.copy(isMine = true))
         call.respond(saved)
     }
-
+    post("/messages/{id}/reactions") {
+        val emoji = (call.receive<Map<String, String>>())["emoji"] ?: "👍"
+        chats.toggleReaction(call.parameters["id"]!!.toLong(), call.userId, emoji)
+        call.respond(mapOf("ok" to true))
+    }
     // WebSocket: ws://host:8080/ws/chat?chatId=1&token=<accessToken>
     webSocket("/ws/chat") {
         val token = call.request.queryParameters["token"] ?: run { close(); return@webSocket }
-        val chatId = call.request.queryParameters["chatId"]?.toLongOrNull() ?: run { close(); return@webSocket }
+        val chatId = call.request.queryParameters["chatId"]?.toLongOrNull()
+            ?: run { close(); return@webSocket }
         val decoded = try {
             JWT.require(Algorithm.HMAC256(JwtConfig.secret))
-                .withAudience(JwtConfig.audience).withIssuer(JwtConfig.issuer).build().verify(token)
-        } catch (e: Exception) { close(); return@webSocket }
+                .withAudience(JwtConfig.audience)
+                .withIssuer(JwtConfig.issuer)
+                .build()
+                .verify(token)
+        } catch (e: Exception) {
+            close(); return@webSocket
+        }
         val userId = decoded.getClaim("userId").asLong()
 
         chats.join(chatId, this)
