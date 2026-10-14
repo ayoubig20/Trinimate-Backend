@@ -86,6 +86,7 @@ class MiscService {
                     body = it[Notifications.body],
                     read = it[Notifications.read],
                     createdAt = it[Notifications.createdAt],
+                    refId = it[Notifications.refId],
                 )
             }
     }
@@ -98,5 +99,23 @@ class MiscService {
             it[Notifications.body] = body
             it[Notifications.createdAt] = System.currentTimeMillis()
         }
+    }
+    fun sports(): List<SportResponse> = transaction {
+        Sports.selectAll().orderBy(Sports.name).map { SportResponse(it[Sports.id], it[Sports.name]) }
+    }
+
+    fun markNotificationRead(id: Long, userId: Long) = transaction {
+        Notifications.update({ (Notifications.id eq id) and (Notifications.userId eq userId) }) {
+            it[read] = true
+        }
+    }
+
+    fun markAllNotificationsRead(userId: Long) = transaction {
+        Notifications.update({ Notifications.userId eq userId }) { it[read] = true }
+    }
+    fun unreadCount(userId: Long): Int = transaction {
+        Notifications.select {
+            (Notifications.userId eq userId) and (Notifications.read eq false)
+        }.count().toInt()
     }
 }

@@ -18,6 +18,7 @@ object Users : Table("users") {
     val radiusKm = double("radius_km").default(5.0)
     val rating = double("rating").default(0.0)
     val createdAt = long("created_at")
+    init { index(false, latitude, longitude) }
     override val primaryKey = PrimaryKey(id)
 }
 
@@ -42,6 +43,12 @@ object Sessions : Table("sessions") {
     val createdBy = reference("created_by", Users.id)
     val visibleToCommunity = bool("visible").default(true)
     val createdAt = long("created_at")
+    init { index(false, dateTime) }
+    val durationMinutes = integer("duration_minutes").nullable()
+    val levelRequired = varchar("level_required", 32).nullable()
+    val description = text("description").nullable()
+    val tags = text("tags").nullable()          // comma-separated
+    val equipment = text("equipment").nullable() // comma-separated
     override val primaryKey = PrimaryKey(id)
 }
 
@@ -59,17 +66,27 @@ object Pings : Table("pings") {
     val message = varchar("message", 512).nullable()
     val status = varchar("status", 16).default("pending")
     val createdAt = long("created_at")
+    init { uniqueIndex(fromUser, toUser) }
     override val primaryKey = PrimaryKey(id)
 }
 
 object Chats : Table("chats") {
     val id = long("id").autoIncrement()
-    val userA = reference("user_a", Users.id)
-    val userB = reference("user_b", Users.id)
+    // 1:1 chats fill both; group (session) chats leave them null
+    val userA = reference("user_a", Users.id).nullable()
+    val userB = reference("user_b", Users.id).nullable()
+    val sessionId = reference("session_id", Sessions.id).nullable() // non-null = group chat
     val createdAt = long("created_at")
+    init { uniqueIndex(sessionId) } // one group chat per session (NULLs are allowed multiple times)
     override val primaryKey = PrimaryKey(id)
 }
-
+object ChatMembers : Table("chat_members") {
+    val chatId = reference("chat_id", Chats.id, onDelete = ReferenceOption.CASCADE)
+    val userId = reference("user_id", Users.id, onDelete = ReferenceOption.CASCADE)
+    val joinedAt = long("joined_at")
+    val leftAt = long("left_at").nullable() // null = active member
+    override val primaryKey = PrimaryKey(chatId, userId)
+}
 object Messages : Table("messages") {
     val id = long("id").autoIncrement()
     val chatId = reference("chat_id", Chats.id, onDelete = ReferenceOption.CASCADE)
@@ -77,6 +94,7 @@ object Messages : Table("messages") {
     val text = text("text")
     val kind = varchar("kind", 16).default("text")
     val sentAt = long("sent_at")
+    init { index(false, chatId, sentAt) }
     override val primaryKey = PrimaryKey(id)
 }
 
@@ -108,6 +126,7 @@ object Notifications : Table("notifications") {
     val body = text("body")
     val read = bool("read").default(false)
     val createdAt = long("created_at")
+    init { index(false, userId, createdAt) }
     override val primaryKey = PrimaryKey(id)
 }
 
@@ -125,4 +144,17 @@ object Ratings : Table("ratings") {
     val stars = integer("stars")
     val createdAt = long("created_at")
     override val primaryKey = PrimaryKey(sessionId, raterId, ratedId)
+}
+object Sports : Table("sports") {
+    val id = integer("id").autoIncrement()
+    val name = varchar("name", 64).uniqueIndex()
+    override val primaryKey = PrimaryKey(id)
+}
+
+/** Last message each user has read in each chat. */
+object ChatReads : Table("chat_reads") {
+    val chatId = reference("chat_id", Chats.id, onDelete = ReferenceOption.CASCADE)
+    val userId = reference("user_id", Users.id, onDelete = ReferenceOption.CASCADE)
+    val lastReadMessageId = long("last_read_message_id").default(0)
+    override val primaryKey = PrimaryKey(chatId, userId)
 }

@@ -6,6 +6,8 @@ import io.ktor.server.plugins.cors.routing.*
 import io.ktor.server.plugins.statuspages.*
 import io.ktor.server.response.*
 import com.trinimate.models.ErrorResponse
+import com.trinimate.exceptions.NotFoundException
+import com.trinimate.exceptions.ForbiddenException
 
 fun Application.configureHTTP() {
     install(CORS) {
@@ -19,6 +21,9 @@ fun Application.configureHTTP() {
         allowMethod(HttpMethod.Options)
     }
     install(StatusPages) {
+        exception<ForbiddenException> { call, e -> call.respond(HttpStatusCode.Forbidden, ErrorResponse(e.message ?: "Forbidden")) }
+        exception<NotFoundException> { call, e -> call.respond(HttpStatusCode.NotFound, ErrorResponse(e.message ?: "Not found")) }
+        exception<IllegalArgumentException> { call, e -> call.respond(HttpStatusCode.BadRequest, ErrorResponse(e.message ?: "Bad request")) }
         exception<Throwable> { call, cause ->
             call.application.environment.log.error("Request failed", cause)
             call.respond(HttpStatusCode.InternalServerError, ErrorResponse(cause.message ?: "Internal error"))

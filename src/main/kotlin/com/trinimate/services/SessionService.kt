@@ -5,8 +5,9 @@ import com.trinimate.models.*
 import org.jetbrains.exposed.sql.*
 import org.jetbrains.exposed.sql.SqlExpressionBuilder.eq
 import org.jetbrains.exposed.sql.transactions.transaction
+import com.trinimate.db.Users
 
-class SessionService {
+class SessionService(private val chats: ChatService) {
 
     private fun response(row: ResultRow): SessionResponse {
         val joined = transaction {
@@ -18,6 +19,11 @@ class SessionService {
             price = row[Sessions.price],
             playersNeeded = row[Sessions.playersNeeded], playersJoined = joined,
             createdBy = row[Sessions.createdBy],
+            durationMinutes = row[Sessions.durationMinutes],
+            level = row[Sessions.levelRequired],
+            description = row[Sessions.description],
+            tags = row[Sessions.tags],
+            equipment = row[Sessions.equipment],
         )
     }
     fun leave(sessionId: Long, userId: Long) = transaction {
@@ -27,6 +33,16 @@ class SessionService {
             (SessionParticipants.sessionId eq sessionId) and
                     (SessionParticipants.userId eq userId)
         }
+        val name = Users.select { Users.id eq userId }.single()[Users.name]
+        val remaining = SessionParticipants.select {
+            SessionParticipants.sessionId eq sessionId
+        }.count().toInt()
+        upsertOrganizerStateNotification(
+            organizer = s[Sessions.createdBy], sessionId = sessionId,
+            title = "Player left",
+            body = "$name left ${s[Sessions.title]} — now $remaining/${s[Sessions.playersNeeded]}",
+        )
+        chats.leaveSessionChat(sessionId, userId)
     }
 
     /** Rates another participant after the session happened. */
@@ -64,14 +80,22 @@ class SessionService {
     }
 
     fun create(userId: Long, req: SessionRequest): SessionResponse = transaction {
+        require(Sports.select { Sports.name eq req.sport }.count() > 0) { "Unknown sport" }
         val id = Sessions.insert {
             it[sport] = req.sport; it[title] = req.title; it[dateTime] = req.dateTime
             it[place] = req.place; it[fee] = req.fee; it[playersNeeded] = req.playersNeeded
             it[latitude] = req.latitude; it[longitude] = req.longitude
             it[visibleToCommunity] = req.visibleToCommunity
             it[createdBy] = userId; it[createdAt] = System.currentTimeMillis()
+            it[price] = req.price
+            it[durationMinutes] = req.durationMinutes
+            it[levelRequired] = req.level
+            it[description] = req.description
+            it[tags] = req.tags?.joinToString(",")
+            it[equipment] = req.equipment?.joinToString(",")
         } get Sessions.id
         SessionParticipants.insert {
+            chats.joinSessionChat(id, userId)
             it[sessionId] = id; it[SessionParticipants.userId] = userId
             it[joinedAt] = System.currentTimeMillis()
         }
@@ -94,16 +118,15 @@ class SessionService {
         val joinerName = Users.select { Users.id eq userId }.single()[Users.name]
         val spotsLeft = s[Sessions.playersNeeded] - joined - 1
 
-        // Notify the ORGANIZER
-        Notifications.insert {
-            it[Notifications.userId] = s[Sessions.createdBy]
-            it[type] = "session"
-            it[refId] = userId
-            it[title] = "Player joined"
-            it[body] = "$joinerName joined ${s[Sessions.title]} — $spotsLeft spots left"
-            it[createdAt] = System.currentTimeMillis()
-        }
-        // Notify the JOINER (confirmation)
+        // ONE organizer notification — updated in place with the latest state
+        upsertOrganizerStateNotification(
+            organizer = s[Sessions.createdBy],
+            sessionId = sessionId,
+            title = "Player joined",
+            body = "$joinerName joined ${s[Sessions.title]} — " +
+                    if (spotsLeft > 0) "$spotsLeft spots left" else "session complete!",
+        )
+        // joiner confirmation
         Notifications.insert {
             it[Notifications.userId] = userId
             it[type] = "session"
@@ -112,11 +135,16 @@ class SessionService {
             it[body] = "You joined ${s[Sessions.title]} at ${s[Sessions.place]}"
             it[createdAt] = System.currentTimeMillis()
         }
+        // group chat: creates the chat if needed, re-activates membership,
+        // and posts "X joined the session" (handled inside)
+        chats.joinSessionChat(sessionId, userId)
+
         response(Sessions.select { Sessions.id eq sessionId }.single())
     }
 
     fun update(id: Long, userId: Long, req: SessionRequest): SessionResponse = transaction {
         val s = Sessions.select { Sessions.id eq id }.single()
+        require(Sports.select { Sports.name eq req.sport }.count() > 0) { "Unknown sport" }
         require(s[Sessions.createdBy] == userId) { "Only the organizer can edit" }
         Sessions.update({ Sessions.id eq id }) {
             it[title] = req.title
@@ -128,6 +156,12 @@ class SessionService {
             it[latitude] = req.latitude
             it[longitude] = req.longitude
             it[visibleToCommunity] = req.visibleToCommunity
+            it[sport] = req.sport
+            it[durationMinutes] = req.durationMinutes
+            it[levelRequired] = req.level
+            it[description] = req.description
+            it[tags] = req.tags?.joinToString(",")
+            it[equipment] = req.equipment?.joinToString(",")
         }
         response(Sessions.select { Sessions.id eq id }.single())
     }
@@ -152,5 +186,51 @@ class SessionService {
             (SessionParticipants.sessionId eq sessionId) and
                     (SessionParticipants.userId eq targetId)
         }
+        val name = Users.select { Users.id eq targetId }.single()[Users.name]
+        val remaining = SessionParticipants.select {
+            SessionParticipants.sessionId eq sessionId
+        }.count().toInt()
+        upsertOrganizerStateNotification(
+            organizer = requesterId, sessionId = sessionId,
+            title = "Player removed",
+            body = "You removed $name from ${s[Sessions.title]} — now $remaining/${s[Sessions.playersNeeded]}",
+        )
+        chats.leaveSessionChat(sessionId, targetId)
+    }
+    /** ONE notification row per (organizer, session) — body overwritten with the latest state. */
+    private fun upsertOrganizerStateNotification(
+        organizer: Long, sessionId: Long, title: String, body: String,
+    ) {
+        val existing = Notifications.select {
+            (Notifications.userId eq organizer) and
+                    (Notifications.type eq "session") and
+                    (Notifications.refId eq sessionId)
+        }.singleOrNull()
+        if (existing != null) {
+            Notifications.update({ Notifications.id eq existing[Notifications.id] }) {
+                it[Notifications.title] = title
+                it[Notifications.body] = body
+                it[Notifications.read] = false
+                it[Notifications.createdAt] = System.currentTimeMillis()
+            }
+        } else {
+            Notifications.insert {
+                it[Notifications.userId] = organizer
+                it[Notifications.type] = "session"
+                it[Notifications.refId] = sessionId
+                it[Notifications.title] = title
+                it[Notifications.body] = body
+                it[Notifications.createdAt] = System.currentTimeMillis()
+            }
+        }
+    }
+    /** Sessions the user joined or organized. role = "joined" | "organized" */
+    fun mine(userId: Long, role: String): List<SessionResponse> = transaction {
+        val rows = when (role) {
+            "organized" -> Sessions.select { Sessions.createdBy eq userId }
+            else -> (Sessions innerJoin SessionParticipants)
+                .select { SessionParticipants.userId eq userId }
+        }
+        rows.orderBy(Sessions.dateTime, SortOrder.DESC).map(::response)
     }
 }

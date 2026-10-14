@@ -62,6 +62,13 @@ class PlayerService {
     }
 
     fun updateProfile(userId: Long, req: UpdateProfileRequest): UserResponse = transaction {
+        // 1. Validate sport names against the Sports table (before changing anything)
+        req.sports?.forEach { s ->
+            val known = Sports.select { Sports.name eq s.sport }.count() > 0
+            require(known) { "Unknown sport: ${s.sport}" }
+        }
+
+        // 2. Update the basic profile fields
         Users.update({ Users.id eq userId }) { st ->
             req.name?.let { st[name] = it }
             req.city?.let { st[city] = it }
@@ -70,48 +77,69 @@ class PlayerService {
             req.longitude?.let { st[longitude] = it }
             req.radiusKm?.let { st[radiusKm] = it }
         }
+
+        // 3. Replace the user's sports
         req.sports?.let { list ->
             UserSports.deleteWhere { UserSports.userId eq userId }
             list.forEach { s ->
                 UserSports.insert {
-                    it[UserSports.userId] = userId; it[sport] = s.sport; it[level] = s.level
+                    it[UserSports.userId] = userId
+                    it[UserSports.sport] = s.sport
+                    it[UserSports.level] = s.level
                 }
             }
         }
+
         userResponse(Users.select { Users.id eq userId }.single())
     }
 
     /** Toggles a ping. Returns {"pinged": true} when created, false when removed. */
     fun togglePing(from: Long, to: Long, message: String?): Map<String, Boolean> = transaction {
         require(from != to) { "You cannot ping yourself" }
-        val existing = Pings.select {
-            (Pings.fromUser eq from) and (Pings.toUser eq to) and (Pings.status eq "pending")
-        }.singleOrNull()
+        require(Users.select { Users.id eq to }.count() > 0) { "User not found" }
 
+        val existing = Pings.select { (Pings.fromUser eq from) and (Pings.toUser eq to) }.singleOrNull()
         if (existing != null) {
+            if (existing[Pings.status] == "accepted") return@transaction mapOf("pinged" to true)
             Pings.deleteWhere { Pings.id eq existing[Pings.id] }
-            mapOf("pinged" to false)
-        } else {
-            Pings.insert {
-                it[fromUser] = from; it[toUser] = to; it[Pings.message] = message
-                it[createdAt] = System.currentTimeMillis()
-            }
-            Notifications.insert {
-                it[Notifications.userId] = to
-                it[type] = "ping"
-                it[refId] = from
-                it[title] = "New ping!"
-                it[body] = "A player nearby wants to play with you."
-                it[createdAt] = System.currentTimeMillis()
-            }
-            mapOf("pinged" to true)
+            return@transaction mapOf("pinged" to false)
         }
+        val fromName = Users.select { Users.id eq from }.single()[Users.name]
+        Pings.insert {
+            it[fromUser] = from; it[toUser] = to; it[Pings.message] = message
+            it[createdAt] = System.currentTimeMillis()
+        }
+        Notifications.insert {
+            it[Notifications.userId] = to
+            it[type] = "ping"
+            it[refId] = from                       // the sender's user id
+            it[title] = "New ping!"
+            it[body] = "$fromName wants to play with you."
+            it[createdAt] = System.currentTimeMillis()
+        }
+        mapOf("pinged" to true)
     }
 
-    fun acceptPing(pingId: Long, userId: Long) = transaction {
-        val updated = Pings.update({ (Pings.id eq pingId) and (Pings.toUser eq userId) }) {
-            it[status] = "accepted"
-        }
+    fun acceptPingFrom(fromUserId: Long, me: Long, chats: ChatService): Long = transaction {
+        val updated = Pings.update({
+            (Pings.fromUser eq fromUserId) and (Pings.toUser eq me) and (Pings.status eq "pending")
+        }) { it[status] = "accepted" }
         require(updated == 1) { "Ping not found" }
+
+        val myName = Users.select { Users.id eq me }.single()[Users.name]
+        Notifications.insert {
+            it[Notifications.userId] = fromUserId
+            it[type] = "ping"
+            it[refId] = me
+            it[title] = "Ping accepted!"
+            it[body] = "$myName accepted your ping. Say hello!"
+            it[createdAt] = System.currentTimeMillis()
+        }
+        chats.getOrCreateChat(me, fromUserId)
+    }
+    fun setAvatar(userId: Long, url: String?): String? = transaction {
+        val old = Users.select { Users.id eq userId }.single()[Users.avatarUrl]
+        Users.update({ Users.id eq userId }) { it[Users.avatarUrl] = url }
+        old
     }
 }

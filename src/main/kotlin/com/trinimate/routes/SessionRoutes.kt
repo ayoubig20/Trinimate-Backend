@@ -10,10 +10,11 @@ import io.ktor.server.request.*
 import io.ktor.server.response.*
 import io.ktor.server.routing.*
 import org.koin.ktor.ext.inject
-
+import com.trinimate.services.ChatService
 fun Route.sessionRoutes() {
     val sessions by inject<SessionService>()
     val players by inject<PlayerService>()
+    val chats by inject<ChatService>()
     get("/sessions") { call.respond(sessions.list()) }
     get("/sessions/{id}") { call.respond(sessions.get(call.parameters["id"]!!.toLong())) }
     post("/sessions") { call.respond(sessions.create(call.userId, call.receive())) }
@@ -59,5 +60,13 @@ fun Route.sessionRoutes() {
         } catch (e: IllegalArgumentException) {
             call.respond(HttpStatusCode.Forbidden, ErrorResponse(e.message!!))
         }
+    }
+    get("/sessions/mine") {
+        val role = call.request.queryParameters["role"] ?: "joined"
+        call.respond(sessions.mine(call.userId, role))
+    }
+    get("/sessions/{id}/chat") {
+        call.respond(mapOf("chatId" to chats.sessionChatFor(
+            call.parameters["id"]!!.toLong(), call.userId)))
     }
 }

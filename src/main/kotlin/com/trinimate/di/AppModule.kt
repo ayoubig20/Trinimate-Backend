@@ -8,7 +8,7 @@ val appModule = module {
     single { PasswordHasher() }
     single { AuthService(get()) }
     single { PlayerService() }
-    single { SessionService() }
     single { ChatService() }
+    single { SessionService(get()) }
     single { MiscService() }
 }

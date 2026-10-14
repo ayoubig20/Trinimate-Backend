@@ -34,4 +34,16 @@ fun Route.miscRoutes() {
             call.respond(HttpStatusCode.Forbidden, ErrorResponse(e.message!!))
         }
     }
+    get("/sports") { call.respond(misc.sports()) }
+    put("/notifications/{id}/read") {
+        misc.markNotificationRead(call.parameters["id"]!!.toLong(), call.userId)
+        call.respond(mapOf("ok" to true))
+    }
+    put("/notifications/read-all") {
+        misc.markAllNotificationsRead(call.userId)
+        call.respond(mapOf("ok" to true))
+    }
+    get("/notifications/unread-count") {
+        call.respond(mapOf("count" to misc.unreadCount(call.userId)))
+    }
 }

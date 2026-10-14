@@ -10,6 +10,8 @@ import io.ktor.server.netty.EngineMain
 import io.ktor.server.routing.*
 import org.koin.ktor.plugin.Koin
 import org.koin.logger.slf4jLogger
+import io.ktor.server.http.content.*
+import java.io.File
 
 fun main(args: Array<String>) = EngineMain.main(args)
 
@@ -21,6 +23,7 @@ fun Application.module() {
     configureHTTP()
     configureDatabases()
     routing {
+        staticFiles("/uploads", File("uploads"))
         route("/api/v1") {
             authRoutes()
             authenticate("auth-jwt") {

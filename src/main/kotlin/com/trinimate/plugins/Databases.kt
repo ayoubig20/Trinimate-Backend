@@ -25,9 +25,20 @@ fun Application.configureDatabases() {
         SchemaUtils.createMissingTablesAndColumns(
             Users, UserSports, Sessions, SessionParticipants,
             Pings, Chats, Messages, Events, EventParticipants,
-            Notifications, Reactions, Ratings,
+            Notifications, Reactions, Ratings,Sports,ChatReads,ChatMembers
         )
-
+        if (Sports.selectAll().count() == 0L) {
+            val allSports = listOf(
+                "Running", "Yoga", "Fitness", "Swimming", "Boxing", "Cycling", "Pilates",
+                "Equitation", "Hiking", "Tennis", "Padel", "Badminton", "Squash",
+                "Table Tennis", "Judo", "Fencing", "Golf", "Football", "Basketball",
+                "Volleyball", "Handball", "Rugby", "Cricket", "Baseball",
+            )
+            val existingSports = Sports.selectAll().map { it[Sports.name] }.toSet()
+            allSports.filter { it !in existingSports }.forEach { n ->
+                Sports.insert { it[Sports.name] = n }
+            }
+        }
         // Seed demo events once, so the Community screen has data
         if (Events.selectAll().count() == 0L && Users.selectAll().count() > 0L) {
             val day = 24L * 3600 * 1000
